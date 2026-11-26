@@ -65,4 +65,4 @@ On the same Ryzen 5 development laptop, the packaged E-18 implementation took a 
 
 ## Project status
 
-MyoE v0.1.0 is a local release candidate. See [release notes](docs/release-notes-v0.1.0.md), [attribution](NOTICE.md), and the [publication checklist](docs/publication-checklist.md). Public publication requires the owner's approval.
+The MyoE repository is public. The v0.1.0 source was verified on Windows and Linux in GitHub Actions. The packaged GitHub release is being prepared. See [release notes](docs/release-notes-v0.1.0.md), [attribution](NOTICE.md), and the [release verification record](docs/release-verification.md).

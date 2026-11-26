@@ -1,10 +1,10 @@
 # Release verification
 
-MyoE v0.1.0 is a local release candidate. This record covers software behavior, tensor provenance, and synthetic measurements. It does not establish independent-participant generalization or approval to publish.
+This record covers MyoE v0.1.0 software behavior, tensor provenance and synthetic measurements. It does not establish independent-participant generalization.
 
 ## Encoder provenance
 
-The bundled encoder is the 18-source GRABMyo Session 1 source encoder trained for 20,000 updates with seed 2101. Its original trusted Torch checkpoint had SHA-256 `b14dcd6b09fb7bbf322ce36290c69522bebc73eb2b8233ea5576fd61a3ccc1ad`. The original checkpoint was read locally with `weights_only=True` during conversion. The sorted, typed, shaped encoder state digest was `46efd84b1f06befb2e2c9ffa66dc37977cbb6d6a8e57e62d951ae99c88204178` before and after conversion. The shipped numeric NPZ SHA-256 is `1cc9a0afec84abebd0e0b9526c5d521ccbf382e98a5997722a8b6c81404477df`. It contains only the eight encoder arrays; it contains no head, recording, exposure log, or target data. Distribution approval remains subject to the project owner's final release decision.
+The bundled encoder is the 18-source GRABMyo Session 1 source encoder trained for 20,000 updates with seed 2101. Its original trusted Torch checkpoint had SHA-256 `b14dcd6b09fb7bbf322ce36290c69522bebc73eb2b8233ea5576fd61a3ccc1ad`. The original checkpoint was read locally with `weights_only=True` during conversion. The sorted, typed, shaped encoder state digest was `46efd84b1f06befb2e2c9ffa66dc37977cbb6d6a8e57e62d951ae99c88204178` before and after conversion. The shipped numeric NPZ SHA-256 is `1cc9a0afec84abebd0e0b9526c5d521ccbf382e98a5997722a8b6c81404477df`. It contains only the eight encoder arrays; it contains no head, recording, exposure log, or target data. The project owner approved its redistribution under CC BY 4.0.
 
 ## Exact synthetic equivalence
 
@@ -16,7 +16,7 @@ Windows 11 on the development Ryzen 5 CPU, Python 3.14.4. The pinned research en
 
 The previously verified build of `myoe-0.1.0-py3-none-any.whl` had SHA-256 `4a5b399a80ca42d1a876532ab8bf4d0294636fa175fddef81e5582204c9d547a`. `myoe/core.py` SHA-256 `f10e6d8633ed228ef0279c531ac8bc97cfd2e179e6b5e8920913c0f47a36f0b7`. The test suite includes invalid archive shapes, oversized archives, malformed NPY headers, object-array rejection, invalid calibration, finite inputs, reproducible personalization, and export/import.
 
-WSL is not installed on the development machine. Linux and other Python versions are configured in GitHub Actions but the workflow has not yet been dispatched. A public release should wait for the workflow result. Numerical reproducibility across OS, hardware, and library versions is not guaranteed.
+The GitHub Actions matrix passed on Windows and Ubuntu with Python 3.11 and 3.14 for source commit `7fabd627f4655e73b37f3e052fbe124b93461c86`. WSL was not available on the development machine. Numerical reproducibility across OS, hardware and library versions is not guaranteed.
 
 ## Synthetic CPU measurements
 
