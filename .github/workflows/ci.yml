@@ -1,0 +1,34 @@
+﻿name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.14']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip build
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m build --wheel
+      - run: python -m pip install .[demo,test]
+      - run: python -m pytest -q
+      - name: Install wheel and verify checkpoint from outside checkout
+        shell: python
+        run: |
+          import os, pathlib, subprocess, sys, tempfile
+          wheel = next(pathlib.Path('dist').glob('*.whl')).resolve()
+          subprocess.run([sys.executable, '-m', 'pip', 'install', '--force-reinstall', '--no-deps', str(wheel)], check=True)
+          with tempfile.TemporaryDirectory() as outside:
+              env = dict(os.environ)
+              env.pop('PYTHONPATH', None)
+              subprocess.run([sys.executable, '-c', 'import myoe; print(myoe.load_pretrained())'], cwd=outside, env=env, check=True)

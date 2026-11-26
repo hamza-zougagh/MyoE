@@ -1,0 +1,10 @@
+﻿{
+  "artifact": "source-2101.npz",
+  "description": "Original E encoder pretrained on 18 GRABMyo Session 1 source participants, seed 2101; no target head or target data",
+  "original_checkpoint_sha256": "b14dcd6b09fb7bbf322ce36290c69522bebc73eb2b8233ea5576fd61a3ccc1ad",
+  "encoder_state_sha256": "46efd84b1f06befb2e2c9ffa66dc37977cbb6d6a8e57e62d951ae99c88204178",
+  "packaged_checkpoint_sha256": "1cc9a0afec84abebd0e0b9526c5d521ccbf382e98a5997722a8b6c81404477df",
+  "original_source_updates": 20000,
+  "source_trials": [1,2,3,4,5,6,7],
+  "weights_publication_status": "pending project owner release approval"
+}
