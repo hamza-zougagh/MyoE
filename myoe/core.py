@@ -4,11 +4,13 @@ from __future__ import annotations
 import copy
 import hashlib
 import io
+import json
 import zipfile
 import math
 from fractions import Fraction
 from importlib.resources import files
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import torch
@@ -18,6 +20,37 @@ from threadpoolctl import threadpool_limits
 from torch import nn
 
 SOURCE_STATE_HASH = "46efd84b1f06befb2e2c9ffa66dc37977cbb6d6a8e57e62d951ae99c88204178"
+_METADATA_FILENAME = "metadata.json"
+_METADATA_MAX_BYTES = 4096
+_METADATA_KEYS = frozenset({
+    "personalization_mode",
+    "adaptation_steps",
+    "warmup_steps",
+    "schedule_total_steps",
+    "schedule_type",
+    "peak_lr",
+    "min_lr",
+})
+PERSONALIZATION_CONFIGS = {
+    "standard": {
+        "personalization_mode": "standard",
+        "adaptation_steps": 2000,
+        "warmup_steps": 100,
+        "schedule_total_steps": 2000,
+        "schedule_type": "warmup_cosine",
+        "peak_lr": 0.001,
+        "min_lr": 0.00001,
+    },
+    "fast": {
+        "personalization_mode": "fast",
+        "adaptation_steps": 1000,
+        "warmup_steps": 100,
+        "schedule_total_steps": 2000,
+        "schedule_type": "truncated_from_2000_cosine",
+        "peak_lr": 0.001,
+        "min_lr": 0.00001,
+    },
+}
 
 
 class Encoder(nn.Module):
@@ -49,12 +82,52 @@ def _model_hash(model):
     return h.hexdigest()
 
 
+def _validate_metadata(raw):
+    if not isinstance(raw, dict) or set(raw) != _METADATA_KEYS:
+        raise ValueError("Invalid personalization metadata fields")
+    mode = raw["personalization_mode"]
+    if not isinstance(mode, str) or mode not in PERSONALIZATION_CONFIGS:
+        raise ValueError("Invalid personalization mode in metadata")
+    steps = raw["adaptation_steps"]
+    warmup = raw["warmup_steps"]
+    schedule_total = raw["schedule_total_steps"]
+    if (isinstance(steps, bool) or not isinstance(steps, int) or
+            isinstance(warmup, bool) or not isinstance(warmup, int) or
+            isinstance(schedule_total, bool) or not isinstance(schedule_total, int) or
+            steps <= 0 or warmup < 0 or schedule_total <= 0 or steps > schedule_total):
+        raise ValueError("Invalid schedule step counts in metadata")
+    schedule_type = raw["schedule_type"]
+    if not isinstance(schedule_type, str) or not schedule_type:
+        raise ValueError("Invalid schedule_type in metadata")
+    peak_lr = raw["peak_lr"]
+    min_lr = raw["min_lr"]
+    if (isinstance(peak_lr, bool) or not isinstance(peak_lr, (int, float)) or
+            isinstance(min_lr, bool) or not isinstance(min_lr, (int, float)) or
+            not math.isfinite(peak_lr) or not math.isfinite(min_lr) or
+            peak_lr <= 0 or min_lr <= 0 or min_lr > peak_lr):
+        raise ValueError("Invalid learning-rate bounds in metadata")
+    return {
+        "personalization_mode": mode,
+        "adaptation_steps": steps,
+        "warmup_steps": warmup,
+        "schedule_total_steps": schedule_total,
+        "schedule_type": schedule_type,
+        "peak_lr": float(peak_lr),
+        "min_lr": float(min_lr),
+    }
+
+
 class MyoEModel:
     """A source encoder with an optional calibration-only classifier head."""
-    def __init__(self, encoder, weights=None, bias=None):
+    def __init__(self, encoder, weights=None, bias=None, metadata=None):
         self.encoder = encoder.cpu().eval()
         self.weights = weights
         self.bias = bias
+        self.metadata = _validate_metadata(metadata) if metadata is not None else None
+
+    @property
+    def personalization_mode(self):
+        return None if self.metadata is None else self.metadata["personalization_mode"]
 
     def save(self, path):
         save_model(self, path)
@@ -70,19 +143,27 @@ def _read_payload(path):
     if len(blob) > 2_000_000:
         raise ValueError("Model archive exceeds 2 MB")
     try:
+        metadata = None
         with zipfile.ZipFile(io.BytesIO(blob)) as archive:
             info = archive.infolist()
+            filenames = [item.filename for item in info]
+            if len(filenames) != len(set(filenames)) or sum(item.file_size for item in info) > 2_000_000:
+                raise ValueError("Invalid model archive members")
             schema = {name: (tuple(value.shape), np.dtype("float32"))
                       for name, value in _new_encoder().state_dict().items()}
             head = {"head.weights": ((16, 64), np.dtype("float64")),
                     "head.bias": ((16,), np.dtype("float64"))}
-            names = [item.filename[:-4] for item in info if item.filename.endswith(".npy")]
-            if (len(names) != len(info) or len(names) != len(set(names)) or
-                    set(names) not in (set(schema), set(schema) | set(head)) or
-                    sum(item.file_size for item in info) > 2_000_000):
+            npy_items = [item for item in info if item.filename.endswith(".npy")]
+            meta_items = [item for item in info if item.filename == _METADATA_FILENAME]
+            if len(npy_items) + len(meta_items) != len(info):
                 raise ValueError("Invalid model archive members")
+            names = [item.filename[:-4] for item in npy_items]
+            if set(names) not in (set(schema), set(schema) | set(head)):
+                raise ValueError("Invalid model archive members")
+            if meta_items and set(names) != (set(schema) | set(head)):
+                raise ValueError("Metadata is only valid for archives with a classifier head")
             schema.update(head)
-            for item in info:
+            for item in npy_items:
                 if item.compress_size > 2_000_000 or item.file_size > 2_000_000:
                     raise ValueError("Model archive member exceeds limit")
                 with archive.open(item) as member:
@@ -94,14 +175,23 @@ def _read_payload(path):
                     if (shape != expected_shape or dtype != expected_dtype or fortran or
                             item.file_size - member.tell() != math.prod(shape) * dtype.itemsize):
                         raise ValueError("Invalid numeric-array header")
+            if meta_items:
+                meta_item = meta_items[0]
+                if meta_item.compress_size > _METADATA_MAX_BYTES or meta_item.file_size > _METADATA_MAX_BYTES:
+                    raise ValueError("Model metadata exceeds size limit")
+                with archive.open(meta_item) as member:
+                    raw_meta = member.read(_METADATA_MAX_BYTES + 1)
+                if len(raw_meta) > _METADATA_MAX_BYTES:
+                    raise ValueError("Model metadata exceeds size limit")
+                metadata = _validate_metadata(json.loads(raw_meta.decode("utf-8")))
         with np.load(io.BytesIO(blob), allow_pickle=False) as arrays:
-            payload = {name: arrays[name].copy() for name in arrays.files}
+            payload = {name: arrays[name].copy() for name in arrays.files if name != _METADATA_FILENAME}
     except Exception as exc:
         raise ValueError("Invalid MyoE numeric archive") from exc
-    return payload
+    return payload, metadata
 
 
-def _from_payload(payload):
+def _from_payload(payload, metadata=None):
     model = _new_encoder()
     schema = model.state_dict()
     names = set(schema)
@@ -115,18 +205,23 @@ def _from_payload(payload):
         state[name] = torch.from_numpy(array)
     model.load_state_dict(state, strict=True)
     weights, bias = payload.get("head.weights"), payload.get("head.bias")
+    resolved_metadata = None
     if weights is not None:
         if weights.dtype != np.float64 or bias.dtype != np.float64 or weights.shape != (16, 64) or bias.shape != (16,):
             raise ValueError("Invalid classifier arrays")
         if not np.isfinite(weights).all() or not np.isfinite(bias).all():
             raise ValueError("Nonfinite classifier parameters")
-    return MyoEModel(model, weights, bias)
+        resolved_metadata = _validate_metadata(metadata) if metadata is not None else dict(PERSONALIZATION_CONFIGS["standard"])
+    elif metadata is not None:
+        raise ValueError("Metadata is only valid for models with a classifier head")
+    return MyoEModel(model, weights, bias, metadata=resolved_metadata)
 
 
 def load_pretrained(path=None):
     """Load the 18-source seed-2101 encoder; fit a head before prediction."""
     path = files("myoe").joinpath("data/source-2101.npz") if path is None else path
-    model = _from_payload(_read_payload(path))
+    payload, metadata = _read_payload(path)
+    model = _from_payload(payload, metadata=metadata)
     if _model_hash(model.encoder) != SOURCE_STATE_HASH or model.weights is not None:
         raise ValueError("Pretrained encoder identity does not match the verified source")
     return model
@@ -140,6 +235,10 @@ def save_model(model, path):
         arrays.update({"head.weights": model.weights, "head.bias": model.bias})
     buffer = io.BytesIO()
     np.savez(buffer, **arrays)
+    if model.weights is not None and model.metadata is not None:
+        meta = _validate_metadata(model.metadata)
+        with zipfile.ZipFile(buffer, "a", compression=zipfile.ZIP_STORED) as archive:
+            archive.writestr(_METADATA_FILENAME, json.dumps(meta, sort_keys=True).encode("utf-8"))
     if hasattr(path, "write"):
         path.write(buffer.getvalue())
     else:
@@ -148,7 +247,8 @@ def save_model(model, path):
 
 def load_model(path):
     """Load a schema-validated, non-pickle MyoE numeric archive."""
-    return _from_payload(_read_payload(path))
+    payload, metadata = _read_payload(path)
+    return _from_payload(payload, metadata=metadata)
 
 
 def _sample_index(t):
@@ -239,8 +339,13 @@ def _stream_seed(seed, participant, draw):
     return int.from_bytes(hashlib.sha256(key.encode("ascii")).digest()[:8], "big")
 
 
-def personalize(model, windows, labels, *, seed=2101, participant=1, draw=1, progress=None):
-    """Run 2,000 full-encoder updates and refit a head on calibration windows."""
+def personalize(model, windows, labels, mode: Literal["standard", "fast"] = "standard", *,
+                seed=2101, participant=1, draw=1, progress=None):
+    """Run full-encoder updates ('standard': 2,000; 'fast': 1,000) and refit a head."""
+    if not isinstance(mode, str) or mode not in PERSONALIZATION_CONFIGS:
+        raise ValueError(f"Unknown personalization mode {mode!r}; expected 'standard' or 'fast'")
+    config = PERSONALIZATION_CONFIGS[mode]
+    total_steps = config["adaptation_steps"]
     x, y = _calibration(windows, labels)
     if not isinstance(seed, int) or not isinstance(participant, int) or not isinstance(draw, int) or participant < 1 or draw < 0:
         raise ValueError("seed, participant and draw must be integer stream coordinates")
@@ -258,7 +363,7 @@ def personalize(model, windows, labels, *, seed=2101, participant=1, draw=1, pro
     rng = np.random.default_rng(_stream_seed(seed, participant, draw))
     pools = {gesture: np.flatnonzero(y == gesture) for gesture in range(1, 17)}
     with threadpool_limits(limits=1):
-        for step in range(1, 2001):
+        for step in range(1, total_steps + 1):
             selected = []
             for _ in range(128):
                 rng.integers(1)  # person, including singleton draw
@@ -283,8 +388,10 @@ def personalize(model, windows, labels, *, seed=2101, participant=1, draw=1, pro
             if any(not torch.isfinite(p).all() for p in parameters):
                 raise RuntimeError("Nonfinite training update")
             if progress is not None:
-                progress(step, 2000)
-    return fit_head(MyoEModel(encoder), x, y)
+                progress(step, total_steps)
+    fitted = fit_head(MyoEModel(encoder), x, y)
+    fitted.metadata = dict(config)
+    return fitted
 
 
 def predict_windows(model, windows):

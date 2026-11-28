@@ -36,3 +36,17 @@ Standalone package measurements and software verification are recorded in [relea
 A synthetic calibration timing using the packaged E-18 encoder on the Ryzen 5 development laptop, with one CPU thread, NumPy 2.5.3 and PyTorch 2.14, took 19.03 seconds for 2,000 adaptation updates and the final calibration-head fit. This synthetic run does not measure recognition performance. The original pipeline produced bit-identical results for the tested synthetic fixture.
 
 On the same Windows system with Python 3.14.4, PyTorch 2.14 CPU, one CPU thread, 100 warmups and 1,000 iterations, public batch-one model-only inference measured 0.452/0.625 ms median/p95. Exact first-window preprocessing plus public probability inference measured 0.849/1.099 ms. The full five-second, 39-window public recording API measured 16.234/20.739 ms. No acquisition or disk I/O was included. The tested personalized NPZ payload was 42,800 bytes and contained 9,008 parameters. These are synthetic software measurements, not recognition outcomes.
+
+## Optional Fast personalization (`mode="fast"`)
+
+Exploratory GRABMyo Session 1 evaluation (`truncated_1000`, 1,000 updates on the 2,000-step warmup-plus-cosine schedule vs. `standard` 2,000 updates across 25 source-disjoint Session 1 targets):
+
+- **1-shot calibration (recommended for Fast mode)**: all-seeds mean macro-F1 delta `-0.0019` (`0/25` `< -0.01`, worst `-0.0069`); seed-2101 all-draws mean delta `-0.0023` (`1/25` `< -0.01`); 100% stable; ~1.72×–1.93× faster.
+- **3-shot calibration (optional/caveated)**: all-seeds mean macro-F1 delta `-0.0059` (`7/25` `< -0.01`, worst `-0.0142`; seed-2101 `4/25` `< -0.01`, worst `-0.0186`). `Standard` (`T=2000`) remains the default for multi-repetition calibration.
+
+Synthetic CPU software timings from `python benchmarks/latency.py` (Windows 11, Ryzen 5 CPU, Python 3.14.4, PyTorch 2.15.0+cpu, one CPU thread, 100 warmups and 1,000 timed calls; fabricated inputs, not recognition outcomes):
+
+| Mode | Updates | Personalization time | Single-window preproc + inference (median / p95) | Archive size |
+|---|---:|---:|---:|---:|
+| `standard` | 2,000 | 21.83 s | 0.759 / 1.053 ms | 43,084 bytes |
+| `fast` | 1,000 | 9.53 s (`2.29×` faster) | 0.755 / 1.012 ms | 43,093 bytes |

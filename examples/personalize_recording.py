@@ -17,6 +17,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("calibration", type=Path)
     parser.add_argument("query", type=Path)
+    parser.add_argument("--mode", choices=("standard", "fast"), default="standard")
     parser.add_argument("--output", type=Path, default=Path("personalized.npz"))
     args = parser.parse_args()
 
@@ -27,7 +28,7 @@ def main():
             raise ValueError("Calibration requires signals (16,10240,16) and labels (16,)")
         windows = np.concatenate([preprocess(signal) for signal in signals])
         window_labels = np.repeat(labels, 39)
-    model = personalize(load_pretrained(), windows, window_labels, seed=2101)
+    model = personalize(load_pretrained(), windows, window_labels, mode=args.mode, seed=2101)
     with np.load(args.query, allow_pickle=False) as data:
         predictions = predict_recording(model, data["signal"])
     save_model(model, args.output)

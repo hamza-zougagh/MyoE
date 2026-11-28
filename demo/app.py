@@ -42,10 +42,12 @@ with st.sidebar:
     model_upload = st.file_uploader('Import personalized model', type=['npz'], key='model')
     if model_upload and st.button('Load model', use_container_width=True):
         try:
-            st.session_state.personalized = load_model(BytesIO(model_upload.getvalue()))
+            loaded = load_model(BytesIO(model_upload.getvalue()))
+            st.session_state.personalized = loaded
             st.session_state.pop('baseline', None)
             st.session_state.pop('personalization_seconds', None)
-            st.success('Personalized model loaded.')
+            mode_label = loaded.personalization_mode or 'unknown'
+            st.success(f'Personalized model loaded (mode: {mode_label}).')
         except Exception as exc:
             st.error(f'Unable to load model: {exc}')
     if 'personalized' in st.session_state:
@@ -92,6 +94,17 @@ cal_col, status_col = st.columns([2, 1])
 with cal_col:
     st.subheader('Personalization')
     st.write('One labeled calibration recording per gesture is used to fit a baseline head and adapt the encoder.')
+    mode_choice = st.radio(
+        'Personalization Mode',
+        ['Standard (default)', 'Fast (~1.7-1.9x faster)'],
+        horizontal=True,
+    )
+    selected_mode = 'fast' if mode_choice.startswith('Fast') else 'standard'
+    st.caption(
+        '`Fast` uses 1,000 updates on the same 2,000-step cosine schedule and is recommended primarily for '
+        '1-shot/interactive use based on exploratory GRABMyo Session 1 benchmarks; `Standard` remains '
+        'recommended for multi-repetition calibration.'
+    )
     ready = source is not None and calibration is not None
     if st.button('Personalize model', disabled=not ready, type='primary'):
         try:
@@ -101,17 +114,22 @@ with cal_col:
             st.session_state.baseline = fit_head(source, windows, targets)
             def report(step, total):
                 if step == total or step % 20 == 0:
-                    progress.progress(step / total, text=f'Personalizing · {step:,} / {total:,} updates')
+                    progress.progress(step / total, text=f'Personalizing ({selected_mode}) · {step:,} / {total:,} updates')
             start = time.perf_counter()
-            st.session_state.personalized = personalize(source, windows, targets, seed=2101, progress=report)
+            st.session_state.personalized = personalize(source, windows, targets, mode=selected_mode, seed=2101, progress=report)
             st.session_state.personalization_seconds = time.perf_counter() - start
             progress.progress(1.0, text='Personalization complete')
         except Exception as exc:
             st.error(f'Personalization failed: {exc}')
 with status_col:
     st.subheader('Model status')
-    state = 'Personalized' if 'personalized' in st.session_state else 'Awaiting calibration'
+    current_model = st.session_state.get('personalized')
+    state = 'Personalized' if current_model is not None else 'Awaiting calibration'
     st.write(f'**{state}**')
+    if current_model is not None and current_model.personalization_mode is not None:
+        steps = current_model.metadata.get('adaptation_steps') if current_model.metadata else None
+        step_note = f' ({steps:,} updates)' if steps else ''
+        st.caption(f'Personalization mode: **{current_model.personalization_mode}**{step_note}')
     if 'personalization_seconds' in st.session_state:
         st.caption(f"Adaptation time {st.session_state.personalization_seconds:.1f} s · CPU")
     st.caption('The before view uses a calibration-fitted head on the frozen source encoder.')

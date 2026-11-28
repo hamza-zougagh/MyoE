@@ -17,7 +17,7 @@ flowchart LR
   E --> F[Calibration-only 16-class linear head]
 ```
 
-The source encoder contains 7,968 parameters. A personalized model contains 9,008 including its affine head. Personalization performs 2,000 updates on labeled calibration examples, then refits the final head using only calibration examples. The source checkpoint requires a fitted head before prediction.
+The source encoder contains 7,968 parameters. A personalized model contains 9,008 including its affine head. Standard personalization (`mode="standard"`, default, bit-for-bit identical to v0.1.0) performs 2,000 updates on labeled calibration examples, then refits the final head using only calibration examples. Optional Fast personalization (`mode="fast"`) runs 1,000 updates on the same 2,000-step warmup-plus-cosine schedule before refitting the head. The source checkpoint requires a fitted head before prediction.
 
 ## Install and run
 
@@ -45,7 +45,7 @@ source = load_pretrained()
 recordings = np.load("calibration.npy", allow_pickle=False)  # (16, 10240, 16)
 windows = np.concatenate([preprocess(recording) for recording in recordings])
 labels = np.repeat(np.arange(1, 17), 39)
-model = personalize(source, windows, labels, seed=2101)
+model = personalize(source, windows, labels, mode="standard", seed=2101)  # or mode="fast"
 query = np.load("query.npy", allow_pickle=False)             # (10240, 16)
 prediction = predict_recording(model, query)
 print(prediction["labels"], prediction["probabilities"])
@@ -62,6 +62,8 @@ The Session 1 exploratory study and prospective Session 2 study used 18 source p
 An earlier CPU test of E reported a 0.481 ms median for preprocessing and inference per window on one development laptop and a personalized payload of 43,781 bytes. That historical measurement used a 12-source E checkpoint, one support window and one CPU thread. Package-specific measurements and their conditions are recorded in [release verification](docs/release-verification.md). Actual timings depend on the machine and numerical libraries.
 
 On the same Ryzen 5 development laptop, the packaged E-18 implementation took a median 0.849 ms for one synthetic window including preprocessing and probability inference. One single-threaded synthetic calibration run took 19.03 seconds for the full 2,000 updates and final-head fit. The personalized NPZ contained 9,008 parameters and occupied 42,800 bytes. These are software measurements on fabricated inputs, not recognition results. See [release verification](docs/release-verification.md) for p95 and measurement details.
+
+An exploratory GRABMyo Session 1 benchmark of `mode="fast"` (`truncated_1000`, 1,000 updates on the same 2,000-step cosine schedule) against `mode="standard"` recommends `fast` primarily for 1-shot/interactive calibration (all-seeds mean macro-F1 delta `-0.0019`, `0/25` participants `< -0.01`, ~1.72×–1.93× faster), while keeping `standard` as the default for multi-repetition calibration (3-shot all-seeds mean delta `-0.0059`, `7/25` `< -0.01`). On the Ryzen 5 development laptop (Python 3.14.4, PyTorch 2.15.0+cpu, one CPU thread, synthetic inputs), `benchmarks/latency.py` measured `21.83 s` for `standard` vs. `9.53 s` for `fast` (`2.29×` speedup), `0.759 ms` vs. `0.755 ms` median single-window preprocessing+inference, and `43,084` vs. `43,093` bytes with persisted schedule metadata. These synthetic timings are software measurements, not recognition outcomes. See [model card](docs/model-card.md) and [benchmark record](docs/benchmarks.md).
 
 ## Project status
 

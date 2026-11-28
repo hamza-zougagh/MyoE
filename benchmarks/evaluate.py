@@ -46,13 +46,15 @@ def metrics(y, p):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('support'); parser.add_argument('query')
+    parser.add_argument('--mode', choices=('standard', 'fast'), default='standard')
     parser.add_argument('--output', default='benchmark-results.json')
     args = parser.parse_args()
     sx, sy, sh, si = read(args.support); qx, qy, qh, qi = read(args.query)
     if sh == qh or set(si) & set(qi):
         raise ValueError('Calibration and query files must differ')
-    model = myoe.personalize(myoe.load_pretrained(), sx, sy)
+    model = myoe.personalize(myoe.load_pretrained(), sx, sy, mode=args.mode)
     result = {'scope':'user supplied query data; disjointness is the operator responsibility',
+              'personalization_mode':args.mode,
               'support_sha256':sh, 'query_sha256':qh, 'window_metrics':metrics(qy,myoe.predict_windows(model,qx)['probabilities'])}
     Path(args.output).write_text(json.dumps(result, indent=2), encoding='utf-8')
     print(json.dumps(result,indent=2))

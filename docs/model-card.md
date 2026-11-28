@@ -14,6 +14,13 @@ A prospective Session 2 A/C/E replication evaluated the same 25 targets on a dif
 
 The E-V2 exploratory benchmark evaluated an E model trained on a **12-person** source pool, using six disjoint source-validation participants and two calibration trials. It informs architecture selection but does not directly measure the 18-person release checkpoint. See [benchmarks.md](benchmarks.md).
 
+An exploratory GRABMyo Session 1 evaluation of optional `mode="fast"` (`truncated_1000`: 1,000 updates on the same 2,000-step warmup-plus-cosine schedule) compared against `mode="standard"` (2,000 updates) across the 25 source-disjoint Session 1 targets found:
+
+- **1-shot calibration (recommended for Fast mode)**: all-seeds mean macro-F1 delta `-0.0019` (`0/25` participants `< -0.01`, worst `-0.0069`); seed-2101 all-draws mean delta `-0.0023` (`1/25` `< -0.01`); 100% stable; ~1.72×–1.93× faster adaptation.
+- **3-shot calibration (optional/caveated)**: all-seeds mean macro-F1 delta `-0.0059` (`7/25` participants `< -0.01`, worst `-0.0142`; seed-2101 `4/25` `< -0.01`, worst `-0.0186`). `Standard` (`T=2000`) remains the default and recommended setting for multi-repetition calibration.
+
+These exploratory Session 1 comparisons are distinct from synthetic CPU software timings and do not establish performance on a newly recruited population or live prosthetic control.
+
 ## Limits
 
 The data came from healthy volunteers with 16 forearm channels and fixed gesture and repetition protocols. Overlapping calibration windows are not independent recordings. Individual performance varied. A softmax score is a model output, not established probability calibration or clinical certainty. The model and replay have not been evaluated in a clinical setting, with prosthetic devices, or as a live control loop. A separately frozen evaluation on genuinely new participants would support stronger independent-population claims.
